@@ -8,7 +8,8 @@ export AWS_REGION=us-east-1 AWS_DEFAULT_REGION=us-east-1 AWS_PAGER=""
 role=${1:?usage: scripts/register-runner.sh [app|platform|llm]}
 [[ "$role" =~ ^(app|platform|llm)$ ]] || { echo "unknown host role: $role" >&2; exit 2; }
 root="$(cd "$(dirname "$0")/.." && pwd)"
-repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+origin=$(git -C "$root" remote get-url origin)
+repo=$(gh repo view "$origin" --json nameWithOwner -q .nameWithOwner)
 [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "invalid GitHub repo" >&2; exit 1; }
 policy=$(gh api "repos/$repo/actions/permissions/fork-pr-contributor-approval" -q .approval_policy)
 [[ "$policy" == all_external_contributors ]] || {
