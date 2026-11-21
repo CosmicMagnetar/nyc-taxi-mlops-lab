@@ -23,14 +23,12 @@ Blocking on `passenger_count` nulls above 15% or 20%. It would catch a collapse 
 
 ## Why
 
-<!-- Draft from the measured numbers. Replace with your own reasoning before you submit. -->
+I set `passenger_count` nulls to warn because the warning still shows the problem without stopping the pipeline, and the rows stay available so we can change or exclude them after exporting the data.
 
-Key fields were never null, so any null is a clear fault. Range limits sit at roughly three times the worst real month, which leaves room for normal variation and still catches a corrupt month. A zero-duplicate rule would have blocked real 2024-02, which has one exact duplicate. The row-count floor catches a truncated file, which would otherwise pass the schema check.
+The blocking limits come from the measured months. Key fields were never null, range limits sit at roughly three times the worst month, a zero-duplicate rule would have blocked real 2024-02, and the row-count floor catches a truncated file.
 
 The accepted risk: a month with very few passenger counts reaches the mart with only a warning, and a partial file above 2,000,000 rows passes.
 
 ## What would show this was wrong
-
-<!-- Add what you would do about each signal. -->
 
 A real month is stopped by a range or row-count check, a corrupt month reaches `zone_hour_stats` without being stopped, or the `passenger_count` warning fires on a month whose other fields look wrong.

@@ -12,14 +12,10 @@ Stage: S1 · Date: 2026-11-21 · Author: CosmicMagnetar · Drafted by agent: yes
 
 ## Why
 
-<!-- The reason for preferring the time key is yours to state. Replace this before you submit. -->
-
-Sorting by pickup time keeps raw trips in time order, which suits time-range queries. Because each file covers about one month, pickup time also roughly follows the month, but the pipeline's filter is on `source_file`, so it gets little direct pruning from this key.
+I chose pickup time over `source_file` because `source_file` is mainly used for deleting and reloading a month, while I expect pickup time to work better in the long run, with less change to the table's order as months are added. The trade-off I accept is that month deletes and `stg_trips` builds filter on `source_file`, so they get little direct pruning from this key.
 
 The cluster is a single `ra3.large` node, so there is no network redistribution between nodes. `auto` leaves the choice to Redshift and needs no skew management. The cost is that the exact style can change over time.
 
 ## What would show this was wrong
-
-<!-- Add the measurement you would act on. -->
 
 Month reloads or `stg_trips` builds slow down noticeably as months accumulate, `svv_table_info` shows a high unsorted percentage on `raw_trips`, or the cluster grows to two nodes and zone joins start redistributing data.
