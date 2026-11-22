@@ -1,0 +1,64 @@
+# Promote a gated model version to `champion`. This workflow is the only thing that moves the alias.
+# Runs in the `production` environment: a required reviewer approves before the job starts.
+name: promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Model version to promote (empty: whatever `challenger` points at)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: [self-hosted, lab-app]
+    environment: production
+    env:
+      MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Move the champion alias
+        # Runs in the serving image (it has mlflow) on the lab network. The version must carry the
+        # evaluation tags the pipeline writes; the outgoing champion is recorded as a tag on the new one.
+        run: |
+          img=$(docker inspect lab-serving-serving-challenger-1 --format '{{.Config.Image}}')
+          docker run --rm -i --network lab -e MLFLOW_TRACKING_URI -e VERSION --entrypoint python "$img" - <<'PY' | tee /tmp/promote.out
+          import os, sys
+          from mlflow import MlflowClient
+
+          name = "trip-duration"
+          c = MlflowClient()
+          version = os.environ.get("VERSION") or c.get_model_version_by_alias(name, "challenger").version
+          mv = c.get_model_version(name, str(version))
+          missing = [k for k in ("mae_min", "champion_mae_min", "p95_latency_ms") if k not in mv.tags]
+          if missing:
+              sys.exit(f"version {version} was not evaluated by the pipeline (missing tags: {missing})")
+          try:
+              old = c.get_model_version_by_alias(name, "champion").version
+          except Exception:
+              old = "none"
+          c.set_model_version_tag(name, str(version), "replaced_champion", old)
+          c.set_registered_model_alias(name, "champion", str(version))
+          print(f"PROMOTED {version} OUTGOING {old}")
+          PY
+          echo "$(tail -1 /tmp/promote.out)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Make serving use it
+        run: deploy/web.sh reload champion
+      - name: Check /predict answers with the new champion
+        run: |
+          version=$(sed -n 's/^PROMOTED \([^ ]*\) .*/\1/p' /tmp/promote.out)
+          body=$(curl -fsS -H 'Content-Type: application/json' http://localhost/predict \
+            -d '{"pickup_zone_id": 132, "dropoff_zone_id": 230, "pickup_datetime": "2024-03-08T17:05:00"}')
+          echo "$body"
+          jq -e --arg v "$version" '.model.alias == "champion" and .model.version == $v' <<<"$body"
