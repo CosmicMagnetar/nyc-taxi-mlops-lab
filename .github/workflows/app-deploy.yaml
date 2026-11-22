@@ -57,8 +57,7 @@ jobs:
           if [[ "$live" == blue ]]; then target=green; else target=blue; fi
           deploy/web.sh smoke "$target" "$COMMIT_SHA"
       - name: Switch traffic (the old colour keeps running for rollback)
-        # DECISION POINT (decisions/: what triggers the switch). This is a placeholder: a passing smoke
-        # test flips it automatically. Change it to what you decide.
+        # decisions/011-switch-trigger.md: a passing smoke test flips it automatically.
         run: |
           live=$(deploy/web.sh live)
           if [[ "$live" == blue ]]; then target=green; else target=blue; fi
