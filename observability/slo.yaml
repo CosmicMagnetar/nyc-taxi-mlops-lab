@@ -14,6 +14,6 @@ slos:
     alert: "PredictLatencyFastBurn pages at 6x burn on 1h and 5m together."
   - name: model-answers
     sli: "share of quotes produced by the model, not the static fallback: 1 - rate(lab_predictions_total{source=fallback}) / rate(lab_predictions_total)"
-    objective: "95% of quotes from the model over 30 days (OPEN: the number is the agent's placeholder, student to confirm in decision 013)"
+    objective: "95% of quotes from the model over 30 days"
     why: "The fallback keeps /predict answering, so availability stays green while riders get a worse quote. Without this SLO a dead serving container is invisible."
     alert: "ModelFallbackFastBurn pages at 6x burn on 1h and 5m together."
