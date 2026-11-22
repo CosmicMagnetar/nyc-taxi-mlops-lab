@@ -63,3 +63,9 @@ module "wiki_secret" {
   name        = "lab/wiki"
   description = "Wiki credentials for the S6 support assistant"
 }
+
+module "grafana_secret" {
+  source      = "../modules/secret"
+  name        = "lab/grafana"
+  description = "Grafana Cloud remote-write url, user and token for Alloy and the rule loader (S5)"
+}

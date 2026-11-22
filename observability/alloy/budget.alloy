@@ -1,10 +1,10 @@
 // Your series budget (S5, decision 014). Every series from this host passes through one of these three
 // before it's sent. Grafana Cloud's free tier allows 10,000 active series for all hosts together
-// (contracts/metrics.yaml). With no rules, everything is sent.
+// (contracts/metrics.yaml). Rule: keep what a dashboard, an SLO or an incident would use; drop the rest.
+// Target: under about 4,000 for app + platform together, so the LLM host in S6 has room.
 //
 // Rules are Prometheus relabelling (https://grafana.com/docs/alloy/latest/reference/components/prometheus/prometheus.relabel/):
-//   rule { source_labels = ["__name__"]  regex = "node_(cpu|memory)_.*"  action = "keep" }
-//   rule { regex = "id"  action = "labeldrop" }
+// each rule sees what the previous one let through.
 
 declare "host" {
 	argument "forward_to" { }
@@ -12,7 +12,33 @@ declare "host" {
 	prometheus.relabel "rules" {
 		forward_to = argument.forward_to.value
 
-		// Your rules for the host's series: CPU? memory? disk? which network devices?
+		// Keep only what the dashboard and incidents use: CPU, memory, root disk, network bytes, and `up`.
+		rule {
+			source_labels = ["__name__"]
+			regex         = "up|node_cpu_seconds_total|node_memory_(MemAvailable|MemTotal)_bytes|node_filesystem_(avail|size)_bytes|node_network_(receive|transmit)_bytes_total"
+			action        = "keep"
+		}
+
+		// CPU: only the modes that say how busy the host is (the dashboard uses idle).
+		rule {
+			source_labels = ["__name__", "mode"]
+			regex         = "node_cpu_seconds_total;(iowait|irq|nice|softirq|steal)"
+			action        = "drop"
+		}
+
+		// Disk: the root filesystem only (not tmpfs, overlays or Docker's mounts).
+		rule {
+			source_labels = ["__name__", "mountpoint"]
+			regex         = "node_filesystem_.*;/.+"
+			action        = "drop"
+		}
+
+		// Network: real interfaces only, not loopback or the per-container veth and bridge devices.
+		rule {
+			source_labels = ["__name__", "device"]
+			regex         = "node_network_.*;(lo|veth.*|br-.*|docker0)"
+			action        = "drop"
+		}
 	}
 
 	export "receiver" {
@@ -26,7 +52,26 @@ declare "containers" {
 	prometheus.relabel "rules" {
 		forward_to = argument.forward_to.value
 
-		// Your rules for the containers' series: which metrics, and which labels change on every deploy?
+		// Memory and CPU per container are what an incident needs; cAdvisor's other ~60 metrics are not.
+		rule {
+			source_labels = ["__name__"]
+			regex         = "up|container_memory_working_set_bytes|container_cpu_usage_seconds_total"
+			action        = "keep"
+		}
+
+		// Series with no container name are cgroup parents (/, /docker): the container series already add up.
+		rule {
+			source_labels = ["__name__", "name"]
+			regex         = "container_.*;"
+			action        = "drop"
+		}
+
+		// `image` carries the tag, so it changes on every deploy and makes new series each time; `id` is a
+		// cgroup path with the container's hash, same problem; container_label_* copy Docker labels.
+		rule {
+			regex  = "id|image|container_label_.*"
+			action = "labeldrop"
+		}
 	}
 
 	export "receiver" {
@@ -40,7 +85,22 @@ declare "services" {
 	prometheus.relabel "rules" {
 		forward_to = argument.forward_to.value
 
-		// Your rules for the services' series (contracts/metrics.yaml, Traefik, runtime metrics).
+		// Keep the contract's lab_* metrics (SLOs, model view), Traefik's per-service request metrics (what S8's
+		// canary compares), and `up`. Python runtime metrics (process_*, python_gc_*) and Traefik's
+		// entrypoint and router metrics are dropped.
+		rule {
+			source_labels = ["__name__"]
+			regex         = "up|lab_.*|traefik_service_requests_total|traefik_service_request_duration_seconds_(bucket|sum|count)"
+			action        = "keep"
+		}
+
+		// Traefik: drop its built-in internal services (api@internal, prometheus@internal, ...), keep the app's
+		// and serving's.
+		rule {
+			source_labels = ["__name__", "service"]
+			regex         = "traefik_service_.*;.*@internal"
+			action        = "drop"
+		}
 	}
 
 	export "receiver" {
