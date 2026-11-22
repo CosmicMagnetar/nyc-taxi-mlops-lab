@@ -43,6 +43,7 @@ jobs:
         env:
           COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           TAG: ${{ inputs.tag }}
+          LLM_HOST: ${{ vars.LLM_HOST }}  # S6: the assistant's LLM host; compose.web.yaml passes it to the app
         run: |
           export IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY,,}"
           deploy/web.sh prepare
