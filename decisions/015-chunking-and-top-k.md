@@ -16,7 +16,11 @@ The cost per request is mostly reading the prompt on the CPU LLM host: about 11 
 
 The wiki's pages are short, so 256 tokens usually holds a whole section. Chunks follow the headings and carry the page title and heading, so a chunk like "It is $4.50" is still findable. The overlap of 32 tokens keeps a sentence at a boundary in both neighbours without repeating much. An answer is only as good as the chunk that holds it, so I prefer chunks that keep a policy and its condition together.
 
-This is a starting point chosen before seeing the wiki text. I will check it by asking a few wiki-only questions and seeing whether the right page is in `sources`.
+This was a starting point chosen before seeing the wiki text. Evidence after running it on 2026-11-22:
+- The wiki has 16 pages and they produced exactly 16 chunks, so each page fits in one 256-token chunk. At this size the chunk size and overlap change nothing; top-k decides what is retrieved.
+- Question "What is the Harbor Line surcharge and when does it apply?": the right page (`harbor-line`, score 0.856) was first of the 3 sources; the others scored 0.66 and 0.63. The answer quoted the page's fee and condition.
+- Timing: embed 25 ms, retrieve 47 ms, generate 40.4 s (the prompt reading dominates), 40.5 s in total. Without the wiki (`use_wiki: false`) the same question takes 5.3 s and the model says it does not know.
+- So k = 3 is enough here, and a lower k = 2 would save about a third of the 40 s because the second and third chunks are weak matches.
 
 ## What would show this was wrong
 
