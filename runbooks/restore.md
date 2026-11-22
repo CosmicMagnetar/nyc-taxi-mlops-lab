@@ -23,15 +23,23 @@ Times are from the drill on 2026-11-22: RDS stopped, notebook stopped and Redshi
 | 3 | `health.sh` line `redshift` | `available` | `aws redshift resume-cluster --cluster-identifier lab` | 4 min 21 s (06:58:55 to 07:03:16) | yes: same two scripts |
 | 4 | Dagster, MLflow, serving containers on the platform host | `docker ps` healthy, restart count 0 | Nothing to do: they never restarted, and kept running through the RDS outage. They answer again as soon as RDS is up (`restart: unless-stopped`, Docker enabled at boot) | 0 min after RDS was available | already automatic |
 | 5 | `health.sh` line `status` | `OK ... status run N min ago` | `gh workflow run status.yaml` | under 1 min | yes: `scripts/restore.sh` dispatches it |
-| 6 | `health.sh` line `laptop-ip` | `OK ... is in ingress_cidrs` | Add the laptop IP to `ingress_cidrs` in `infra/live/terraform.tfvars`, then `terraform apply` | not done in the drill | no: how wide to open ingress is a decision, and apply changes real infrastructure |
+| 6 | `health.sh` line `laptop-ip` | `OK ... is in ingress_cidrs` | Expected WARN, accepted: `ingress_cidrs` is `["0.0.0.0/0"]` (decision 003), so the app is reachable from any IP and nothing is blocked. `health.sh` only looks for a literal `<ip>/32`. If ingress is ever narrowed to a `/32`, add the laptop IP to `infra/live/terraform.tfvars` and `terraform apply` | 0 min | no: ingress width is a decision, and apply changes real infrastructure |
 | 7 | `health.sh` line `notebook` | `Stopped` is fine (only exploration needs it) | `aws sagemaker start-notebook-instance --notebook-instance-name lab` when needed | about 6 min (brief's figure) | optional flag: `scripts/restore.sh --notebook` |
 | 8 | `health.sh` line `predict` | `trip-duration champion <version>`, not the `static-median` fallback | Check serving (`deploy/web.sh status`). If the champion route hangs behind Traefik, `docker restart lab-app-traefik-1` on the app host (seen once, 2026-11-22) | 1 min | no: needs a person to judge |
 | 9 | Dagster UI and MLflow UI tunnels | UIs load on localhost | `aws ssm start-session ... portNumber=3000,localPortNumber=3000`; MLflow `portNumber=5000,localPortNumber=5001` (macOS AirPlay owns local port 5000) | 1 min each | no: tunnels belong to the laptop |
 | 10 | `health.sh` line `llm` | `OK ... runner not registered` is fine until S6 | none yet | n/a | n/a |
 
+## Reboot proof (2026-11-22)
+
+Redshift paused, then `aws ec2 reboot-instances` on the platform host at 07:20:14 UTC, and nothing touched by hand:
+
+- 07:20:46: the `lab-restore` unit resumed Redshift (`boot-restore: rds is available, nothing to do`, `redshift paused, resuming it`), 32 s after the reboot.
+- 07:23:51: Redshift `available`; 07:24:07: `health.sh` shows the platform host OK. Total 3 min 53 s with no one involved.
+- Dagster, MLflow and the code server were back and healthy (`docker ps`, up 3 min) without any command.
+
 ## Done when
 
-- `scripts/health.sh` exits 0 (the laptop-ip WARN means exit 1 until step 6 is decided).
+- `scripts/health.sh` shows OK on every line except the `laptop-ip` WARN, which is expected while ingress is `0.0.0.0/0` (step 6), so its exit status is 1 by design.
 - `curl -X POST http://<app_public_ip>/predict ...` answers with `"alias": "champion"`.
 - `gh workflow run status.yaml` is green and reports RDS and Redshift `available`.
 
