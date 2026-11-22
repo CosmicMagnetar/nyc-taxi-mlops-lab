@@ -1,5 +1,72 @@
 # SLO recording and alerting rules (S5, decision 013), evaluated by your Grafana Cloud stack's ruler.
 # Prometheus rule format: https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/
 # Metric names are contracts/metrics.yaml's. `make check` runs promtool on this file and on any
-# *.test.yaml next to it.
-groups: []
+# *.test.yaml next to it. Objectives are in observability/slo.yaml.
+#
+# Burn rate = observed error ratio / error budget. Page on a fast burn seen in two windows (a long one so a
+# blip doesn't page, a short one so the page stops when the fault does).
+groups:
+  - name: slo-sli
+    interval: 1m
+    rules:
+      # Availability: share of /predict requests that answered 5xx.
+      - record: lab:predict_error_ratio:rate5m
+        expr: (sum(rate(lab_http_requests_total{route="/predict",code=~"5.."}[5m])) or vector(0)) / sum(rate(lab_http_requests_total{route="/predict"}[5m]))
+      - record: lab:predict_error_ratio:rate30m
+        expr: (sum(rate(lab_http_requests_total{route="/predict",code=~"5.."}[30m])) or vector(0)) / sum(rate(lab_http_requests_total{route="/predict"}[30m]))
+      - record: lab:predict_error_ratio:rate1h
+        expr: (sum(rate(lab_http_requests_total{route="/predict",code=~"5.."}[1h])) or vector(0)) / sum(rate(lab_http_requests_total{route="/predict"}[1h]))
+      - record: lab:predict_error_ratio:rate6h
+        expr: (sum(rate(lab_http_requests_total{route="/predict",code=~"5.."}[6h])) or vector(0)) / sum(rate(lab_http_requests_total{route="/predict"}[6h]))
+
+      # Latency: share of /predict requests slower than 250ms (le="0.25" is a bucket edge).
+      - record: lab:predict_slow_ratio:rate5m
+        expr: 1 - sum(rate(lab_http_request_duration_seconds_bucket{route="/predict",le="0.25"}[5m])) / sum(rate(lab_http_request_duration_seconds_count{route="/predict"}[5m]))
+      - record: lab:predict_slow_ratio:rate1h
+        expr: 1 - sum(rate(lab_http_request_duration_seconds_bucket{route="/predict",le="0.25"}[1h])) / sum(rate(lab_http_request_duration_seconds_count{route="/predict"}[1h]))
+
+      # Model answers: share of quotes the static fallback produced.
+      - record: lab:predict_fallback_ratio:rate5m
+        expr: (sum(rate(lab_predictions_total{source="fallback"}[5m])) or vector(0)) / sum(rate(lab_predictions_total[5m]))
+      - record: lab:predict_fallback_ratio:rate1h
+        expr: (sum(rate(lab_predictions_total{source="fallback"}[1h])) or vector(0)) / sum(rate(lab_predictions_total[1h]))
+
+  - name: slo-alerts
+    rules:
+      # Availability objective 99.5%, budget 0.005. Fast: 14.4x = 0.072. Slow: 6x = 0.03.
+      - alert: PredictAvailabilityFastBurn
+        expr: lab:predict_error_ratio:rate1h > 0.072 and lab:predict_error_ratio:rate5m > 0.072
+        for: 2m
+        labels:
+          severity: page
+          slo: predict-availability
+        annotations:
+          summary: "/predict is burning its availability budget at more than 14.4x"
+      - alert: PredictAvailabilitySlowBurn
+        expr: lab:predict_error_ratio:rate6h > 0.03 and lab:predict_error_ratio:rate30m > 0.03
+        for: 15m
+        labels:
+          severity: ticket
+          slo: predict-availability
+        annotations:
+          summary: "/predict is burning its availability budget at more than 6x"
+
+      # Latency objective 95% under 250ms, budget 0.05. Fast: 6x = 0.3.
+      - alert: PredictLatencyFastBurn
+        expr: lab:predict_slow_ratio:rate1h > 0.3 and lab:predict_slow_ratio:rate5m > 0.3
+        for: 2m
+        labels:
+          severity: page
+          slo: predict-latency
+        annotations:
+          summary: "More than 30% of /predict requests are slower than 250ms"
+
+      # Model objective 95% from the model, budget 0.05. Fast: 6x = 0.3.
+      - alert: ModelFallbackFastBurn
+        expr: lab:predict_fallback_ratio:rate1h > 0.3 and lab:predict_fallback_ratio:rate5m > 0.3
+        for: 2m
+        labels:
+          severity: page
+          slo: model-answers
+        annotations:
+          summary: "More than 30% of quotes are coming from the fallback, not the model"

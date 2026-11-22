@@ -1,0 +1,43 @@
+# promtool unit tests for slo.rules.yaml (S5). Traffic is 10 requests/s on /predict (600 per minute).
+rule_files:
+  - slo.rules.yaml
+evaluation_interval: 1m
+
+tests:
+  # An hour of healthy traffic, then every request answers 500: it must page.
+  - interval: 1m
+    input_series:
+      - series: 'lab_http_requests_total{route="/predict",method="POST",code="200"}'
+        values: "0+600x60 36000+0x30"
+      - series: 'lab_http_requests_total{route="/predict",method="POST",code="500"}'
+        values: "0+0x60 600+600x30"
+    alert_rule_test:
+      - eval_time: 62m
+        alertname: PredictAvailabilityFastBurn
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: PredictAvailabilityFastBurn
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              slo: predict-availability
+            exp_annotations:
+              summary: "/predict is burning its availability budget at more than 14.4x"
+
+  # An hour of healthy traffic, then 3 minutes of 500s, then healthy again: it must not page.
+  - interval: 1m
+    input_series:
+      - series: 'lab_http_requests_total{route="/predict",method="POST",code="200"}'
+        values: "0+600x60 36000+0x2 36600+600x20"
+      - series: 'lab_http_requests_total{route="/predict",method="POST",code="500"}'
+        values: "0+0x60 600+600x2 1800+0x20"
+    alert_rule_test:
+      - eval_time: 63m
+        alertname: PredictAvailabilityFastBurn
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: PredictAvailabilityFastBurn
+        exp_alerts: []
+      - eval_time: 80m
+        alertname: PredictAvailabilityFastBurn
+        exp_alerts: []
