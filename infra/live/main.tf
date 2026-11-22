@@ -69,3 +69,9 @@ module "grafana_secret" {
   name        = "lab/grafana"
   description = "Grafana Cloud remote-write url, user and token for Alloy and the rule loader (S5)"
 }
+
+module "langfuse_secret" {
+  source      = "../modules/secret"
+  name        = "lab/langfuse"
+  description = "Langfuse project keys for tracing the support assistant (S6)"
+}
