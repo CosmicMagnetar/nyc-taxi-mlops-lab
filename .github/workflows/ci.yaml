@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-24.04
@@ -19,6 +23,7 @@ jobs:
       - uses: hashicorp/setup-terraform@v4.0.1
         with:
           terraform_version: 1.17.2
+          terraform_wrapper: false
       - run: make check
 
   image:
