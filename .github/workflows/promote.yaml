@@ -58,15 +58,7 @@ jobs:
       - name: Check /predict answers with the new champion
         run: |
           version=$(sed -n 's/^PROMOTED \([^ ]*\) .*/\1/p' /tmp/promote.out)
-          # Traefik health-checks serving every 5s, so a fresh champion can take a few seconds to get traffic.
-          for attempt in $(seq 1 12); do
-            body=$(curl -fsS -m 10 -H 'Content-Type: application/json' http://localhost/predict \
-              -d '{"pickup_zone_id": 132, "dropoff_zone_id": 230, "pickup_datetime": "2024-03-08T17:05:00"}' || true)
-            echo "attempt $attempt: $body"
-            if jq -e --arg v "$version" '.model.alias == "champion" and .model.version == $v' <<<"$body" >/dev/null 2>&1; then
-              exit 0
-            fi
-            sleep 5
-          done
-          echo "/predict never answered with champion v$version" >&2
-          exit 1
+          body=$(curl -fsS -H 'Content-Type: application/json' http://localhost/predict \
+            -d '{"pickup_zone_id": 132, "dropoff_zone_id": 230, "pickup_datetime": "2024-03-08T17:05:00"}')
+          echo "$body"
+          jq -e --arg v "$version" '.model.alias == "champion" and .model.version == $v' <<<"$body"
