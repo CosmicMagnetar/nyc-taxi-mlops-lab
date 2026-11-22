@@ -96,6 +96,10 @@ async def get_model_info() -> dict:
             **{k: tags.get(k) for k in ("training_window", "holdout_month", "features_version", "mae_min", "p95_latency_ms")}}
 
 
+# One constant SQL text per metric; the zone (and optional hour) are bound as named parameters.
+STATS_SQL = {m: f"select pickup_hour, {m} as value, first_month, last_month from marts.zone_hour_stats"
+                " where pickup_zone_id = cast(:zone as integer)" for m in METRICS}
+
 Zone = Annotated[str, Field(description="TLC taxi zone name, e.g. 'JFK Airport' or 'Times Sq/Theatre District'.")]
 Hour = Annotated[int, Field(ge=0, le=23, description="Pickup hour, 24h clock, New York local time.")]
 Day = Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -104,12 +108,30 @@ Metric = Literal["trip_count", "median_duration_min", "p90_duration_min"]
 
 @mcp.tool(description="Predict the duration in minutes of a yellow-taxi trip between two NYC TLC taxi zones, using the champion model.")
 async def predict_duration(pickup_zone: Zone, dropoff_zone: Zone, hour: Hour, day_of_week: Day) -> dict:
-    raise NotImplementedError("S7: predict_duration isn't built yet")
+    """Zone names become TLC ids (a typo gets suggestions), the day becomes features.yaml's pickup_dow (0 = Sunday),
+    and serving-champion's /predict does the rest. est_distance_miles is left out: the model fills it from the zone pair."""
+    body = {"pickup_zone_id": zone_id(pickup_zone), "dropoff_zone_id": zone_id(dropoff_zone),
+            "pickup_hour": hour, "pickup_dow": DAYS.index(day_of_week)}
+    out = await champion("POST", "/predict", body)
+    return {"duration_minutes": out["duration_minutes"], "model": out["model"], "pickup_zone": pickup_zone,
+            "dropoff_zone": dropoff_zone, "hour": hour, "day_of_week": day_of_week}
 
 
 @mcp.tool(description="Historical trip statistics for one pickup zone from the zone_hour_stats mart.")
 def query_zone_stats(zone: Zone, metric: Metric, hour: Annotated[int | None, Field(ge=0, le=23, description="Optional: restrict to one pickup hour.")] = None) -> dict:
-    raise NotImplementedError("S7: query_zone_stats isn't built yet")
+    """One fixed SQL text per metric (the metric is checked against the contract's enum and picks a constant
+    string, never part of one), and the zone and hour are named parameters: nothing from the call is formatted into SQL."""
+    if metric not in STATS_SQL:
+        raise ValueError(f"unknown metric {metric!r}; use one of {', '.join(METRICS)}")
+    zid = zone_id(zone)
+    sql, params = STATS_SQL[metric], {"zone": zid}
+    if hour is not None:
+        sql, params["hour"] = sql + " and pickup_hour = cast(:hour as smallint)", hour
+    rows = Warehouse().query(sql + " order by pickup_hour", params)
+    if not rows:
+        raise ValueError(f"no statistics for zone {zone!r}" + (f" at hour {hour}" if hour is not None else ""))
+    return {"zone": zone, "metric": metric, "by_hour": [{"hour": int(r["pickup_hour"]), "value": r["value"]} for r in rows],
+            "months": f"{rows[0]['first_month']}..{rows[0]['last_month']}"}
 
 
 @mcp.custom_route("/healthz", methods=["GET"])
