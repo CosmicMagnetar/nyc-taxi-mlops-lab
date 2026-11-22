@@ -52,7 +52,7 @@ jobs:
           c.set_registered_model_alias(name, "champion", str(version))
           print(f"PROMOTED {version} OUTGOING {old}")
           PY
-          echo "$(tail -1 /tmp/promote.out)" >> "$GITHUB_STEP_SUMMARY"
+          tail -1 /tmp/promote.out >> "$GITHUB_STEP_SUMMARY"
       - name: Make serving use it
         run: deploy/web.sh reload champion
       - name: Check /predict answers with the new champion
