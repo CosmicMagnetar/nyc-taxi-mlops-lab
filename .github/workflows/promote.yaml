@@ -41,20 +41,32 @@ jobs:
           c = MlflowClient()
           version = os.environ.get("VERSION") or c.get_model_version_by_alias(name, "challenger").version
           mv = c.get_model_version(name, str(version))
-          missing = [k for k in ("mae_min", "champion_mae_min", "p95_latency_ms") if k not in mv.tags]
+          # Only a version the pipeline evaluated and gated (contracts/mlflow.yaml version_tags).
+          required = ("training_window", "holdout_month", "features_version", "mae_min", "p95_latency_ms", "champion_mae_min")
+          missing = [k for k in required if k not in mv.tags]
           if missing:
-              sys.exit(f"version {version} was not evaluated by the pipeline (missing tags: {missing})")
+              sys.exit(f"version {version} lacks tags {missing}: not from the pipeline")
+          if not float(mv.tags["mae_min"]) < float(mv.tags["champion_mae_min"]):
+              sys.exit(f"version {version} did not beat what it was compared with ({mv.tags['mae_min']} vs {mv.tags['champion_mae_min']})")
           try:
               old = c.get_model_version_by_alias(name, "champion").version
           except Exception:
               old = "none"
-          c.set_model_version_tag(name, str(version), "replaced_champion", old)
-          c.set_registered_model_alias(name, "champion", str(version))
+          if old != str(version):
+              # The registered model's previous_champion tag is what a rollback promotes again.
+              c.set_registered_model_tag(name, "previous_champion", old)
+              c.set_registered_model_alias(name, "champion", str(version))
           print(f"PROMOTED {version} OUTGOING {old}")
           PY
-          tail -1 /tmp/promote.out >> "$GITHUB_STEP_SUMMARY"
+          read -r _ v _ old < <(tail -1 /tmp/promote.out)
+          echo "### champion: v$old -> v$v (rollback: run promote with version $old)" >> "$GITHUB_STEP_SUMMARY"
       - name: Make serving use it
-        run: deploy/web.sh reload champion
+        # Decision 010: hot reload. serving-champion keeps answering with the old version until the new
+        # one has loaded, so riders never see a gap.
+        run: |
+          version=$(sed -n 's/^PROMOTED \([^ ]*\) .*/\1/p' /tmp/promote.out)
+          deploy/web.sh reload champion | tee /tmp/reload.json
+          jq -e --arg v "$version" '.version == $v' /tmp/reload.json >/dev/null
       - name: Check /predict answers with the new champion
         run: |
           version=$(sed -n 's/^PROMOTED \([^ ]*\) .*/\1/p' /tmp/promote.out)
